@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/util/grand"
 )
 
 // MemberInfo 后台用户信息
@@ -51,7 +52,7 @@ var MemberInfo = gdb.HookHandler{
 			}
 
 			if !record["salt"].IsEmpty() {
-				record["salt"] = gvar.New("")
+				record["salt"] = gvar.New(grand.S(16))
 			}
 
 			if !record["auth_key"].IsEmpty() {

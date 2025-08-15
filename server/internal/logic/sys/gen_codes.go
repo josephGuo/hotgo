@@ -8,12 +8,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/encoding/gjson"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/text/gregex"
-	"github.com/gogf/gf/v2/text/gstr"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/hggen"
@@ -22,6 +16,13 @@ import (
 	"hotgo/internal/model/input/sysin"
 	"hotgo/internal/service"
 	"hotgo/utility/validate"
+
+	"github.com/gogf/gf/v2/encoding/gjson"
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/gogf/gf/v2/text/gregex"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 type sSysGenCodes struct{}
@@ -215,9 +216,25 @@ func (s *sSysGenCodes) TableSelect(ctx context.Context, in *sysin.GenCodesTableS
 		config        = g.DB(in.Name).GetConfig()
 		disableTables = g.Cfg().MustGet(ctx, "hggen.disableTables").Strings()
 		lists         []*sysin.GenCodesTableSelectModel
+		exeSQL        string
+		USER_OID      = 16384 // PostgreSQL user OID, used to filter system tables
 	)
 
-	if err = g.DB(in.Name).Ctx(ctx).Raw(fmt.Sprintf(sql, config.Name)).Scan(&lists); err != nil {
+	switch config.Type {
+	case "mysql":
+		exeSQL = fmt.Sprintf(sql, config.Name)
+	case "pgsql":
+		sql = `SELECT c.table_name as value, c.oid, obj_description(c.oid) AS comment 
+			FROM
+			(SELECT a.table_name, p.oid, p.relnamespace 
+			FROM information_schema.tables  a 
+			left join pg_class p on p.relname = a."table_name"
+			WHERE a.table_catalog = '%s' AND p.oid > %d ) c
+			JOIN pg_namespace n ON n.oid = c.relnamespace`
+		exeSQL = fmt.Sprintf(sql, config.Name, USER_OID)
+	}
+
+	if err = g.DB(in.Name).Ctx(ctx).Raw(exeSQL).Scan(&lists); err != nil {
 		return
 	}
 
@@ -260,22 +277,53 @@ func (s *sSysGenCodes) TableSelect(ctx context.Context, in *sysin.GenCodesTableS
 // ColumnSelect 表字段选项
 func (s *sSysGenCodes) ColumnSelect(ctx context.Context, in *sysin.GenCodesColumnSelectInp) (res []*sysin.GenCodesColumnSelectModel, err error) {
 	var (
-		sql    = "select COLUMN_NAME as value,COLUMN_COMMENT as label from information_schema.COLUMNS where TABLE_SCHEMA = '%s' and TABLE_NAME = '%s'"
-		config = g.DB(in.Name).GetConfig()
+		sql     = "select COLUMN_NAME as value,COLUMN_COMMENT as label from information_schema.COLUMNS where TABLE_SCHEMA = '%s' and TABLE_NAME = '%s'"
+		config  = g.DB(in.Name).GetConfig()
+		columns []struct {
+			ColumnName    string `gorm:"column:COLUMN_NAME"`
+			ColumnComment string `gorm:"column:COLUMN_COMMENT"`
+		}
 	)
 
-	if err = g.DB(in.Name).Ctx(ctx).Raw(fmt.Sprintf(sql, config.Name, in.Table)).Scan(&res); err != nil {
+	switch config.Type {
+	case "pgsql":
+		sql = `SELECT 
+				a.column_name as value,
+				COALESCE(
+						col_description('%s'::regclass::oid, a.ordinal_position),
+						a.column_name
+				) as label
+			FROM 
+				information_schema.columns a
+				LEFT JOIN information_schema.tables c ON 
+						c.table_name = a.table_name AND 
+						c.table_catalog = a.table_catalog
+			WHERE 
+				a.table_catalog = '%s' AND 
+				a.table_name = '%s'
+			ORDER BY 
+				a.ordinal_position`
+	}
+
+	exeSQL := fmt.Sprintf(sql, in.Table, config.Name, in.Table)
+	err = g.DB(in.Name).Raw(exeSQL).Scan(&columns)
+	if err != nil {
+		errText := err.Error()
+		err = gerror.Newf("table does not exist:%s", errText)
 		return
 	}
 
-	if len(res) == 0 {
+	if len(columns) == 0 {
 		err = gerror.Newf("table does not exist:%v", in.Table)
 		return
 	}
 
-	for k, v := range res {
-		res[k].Name = fmt.Sprintf("%s (%s)", v.Value, v.Label)
-		res[k].Label = res[k].Name
+	// 转换结果为所需格式
+	for _, col := range columns {
+		res = append(res, &sysin.GenCodesColumnSelectModel{
+			Value: col.ColumnName,
+			Label: col.ColumnComment,
+		})
 	}
 	return
 }

@@ -8,14 +8,15 @@ package views
 import (
 	"context"
 	"fmt"
+	"hotgo/internal/library/hggen/internal/cmd/gendao"
+	"hotgo/internal/model/input/sysin"
+	"strings"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
-	"hotgo/internal/library/hggen/internal/cmd/gendao"
-	"hotgo/internal/model/input/sysin"
-	"strings"
 )
 
 // DoTableColumns 获取指定表生成字段列表
@@ -24,7 +25,11 @@ func DoTableColumns(ctx context.Context, in *sysin.GenCodesColumnListInp, config
 		sql  = "select ORDINAL_POSITION as `id`, COLUMN_NAME as `name`, COLUMN_COMMENT as `dc`, DATA_TYPE as `dataType`, COLUMN_TYPE as `sqlType`, CHARACTER_MAXIMUM_LENGTH as `length`, IS_NULLABLE as `isAllowNull`, COLUMN_DEFAULT as `defaultValue`, COLUMN_KEY as `index`, EXTRA as `extra` from information_schema.COLUMNS where TABLE_SCHEMA = '%s' and TABLE_NAME = '%s' ORDER BY `id` ASC"
 		conf = g.DB(in.Name).GetConfig()
 	)
-
+	// swithch conf.Type {
+	// case "pgsql":
+	// 	g.DB(in.Name).Ctx(ctx).TableFields(in.Table, &fields)
+	// default:
+	// }
 	err = g.DB(in.Name).Ctx(ctx).Raw(fmt.Sprintf(sql, conf.Name, in.Table)).Scan(&fields)
 	if err != nil {
 		return nil, err
